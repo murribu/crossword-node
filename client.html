@@ -28,26 +28,28 @@
 	<body>
         <time></time>
         <div id="container">Loading ...</div>
+        <input id="puzzle-slug" value="cory-martin-s-huge-puzzle" />
+        <input type="button" id="start" value="start"/>
     <script src="socket.io/socket.io.js"></script>
     <script src="http://code.jquery.com/jquery-latest.min.js"></script>
     <script>
 
-        // create a new websocket
-        var socket = io.connect('http://localhost:8000');
-        // on message received we print all the data inside the #container div
-        socket.on('notification', function (data) {
-        var usersList = "<dl>";
-        $.each(data.users,function(index,user){
-            usersList += "<dt>" + user.user_name + "</dt>\n" +
-                         "<dd>" + user.user_description + "\n" +
-                            "<figure> <img class='img-polaroid' width='50px' src='" + user.user_img + "' /></figure>"
-                         "</dd>";
+        $('#start').click(function(){
+            var socket = io.connect('http://localhost:8001', {query: "slug=" + $("#puzzle-slug").val() + "&ts=1456177529"});
+            
+            socket.on('notification', function (data) {
+            var squaresList = "<dl>";
+            $.each(data.newsquares,function(index,square){
+                squaresList += "<dt>" + square.row + "</dt>\n" +
+                             "<dd>" + square.col + "\n" +
+                             "</dd>";
+            });
+            squaresList += "</dl>";
+            $('#container').append(squaresList);
+       
+            $('time').html('Last Update:' + data.time);
+            });
         });
-        usersList += "</dl>";
-        $('#container').html(usersList);
-   
-        $('time').html('Last Update:' + data.time);
-      });
     </script>
     </body>
 </html>

@@ -2,17 +2,20 @@ var app = require('http').createServer(handler),
   io = require('socket.io').listen(app),
   fs = require('fs'),
   mysql = require('mysql'),
+  Future = require('fibers/future'),
   connectionsArray = [],
+  config = require('./config'),
   connection = mysql.createConnection({
-    host: 'localhost',
-    user: 'root',
-    password: 'root',
-    database: 'nodejs',
+    host: config.host,
+    user: config.user,
+    password: config.password,
+    database: config.database,
     port: 3306
   }),
   POLLING_INTERVAL = 3000,
-  pollingTimer;
-
+  pollingTimer,
+  port = 8001;
+  
 // If there is an error connecting to the database
 connection.connect(function(err) {
   // connected! (unless `err` is set)
@@ -21,8 +24,8 @@ connection.connect(function(err) {
   }
 });
 
-// creating the server ( localhost:8000 )
-app.listen(8000);
+// creating the server ( localhost:port )
+app.listen(port);
 
 // on server started we can load our client.html page
 function handler(req, res) {
@@ -45,71 +48,76 @@ function handler(req, res) {
  *
  */
 
-var pollingLoop = function() {
+var queryDB = function(socket, interval) {
 
   // Doing the database query
-  var query = connection.query('SELECT * FROM users'),
-    users = []; // this array will contain the result of our db query
+  
+  if (socket.handshake.query.slug){
+      var query = connection.query('SELECT row, col, updated_timestamp_utc FROM crossword2.puzzle_helper_squares where puzzle_id in (select id from puzzles where slug = ?) and updated_timestamp_utc > ?', [socket.handshake.query.slug,  socket.latest_timestamp]),
+      newsquares = []; // this array will contain the result of our db query
 
-  // setting the query listeners
-  query
-    .on('error', function(err) {
-      // Handle error, and 'end' event will be emitted after this as well
-      console.log(err);
-      updateSockets(err);
-    })
-    .on('result', function(user) {
-      // it fills our array looping on each user row inside the db
-      users.push(user);
-    })
-    .on('end', function() {
-      // loop on itself only if there are sockets still connected
-      if (connectionsArray.length) {
-
-        pollingTimer = setTimeout(pollingLoop, POLLING_INTERVAL);
-
-        updateSockets({
-          users: users
+      // setting the query listeners
+      query
+        .on('error', function(err) {
+          // Handle error, and 'end' event will be emitted after this as well
+          console.log(err);
+          socket.emit('notification', err);
+        })
+        .on('result', function(puzzle_helper_square) {
+          // it fills our array looping on each user row inside the db
+          newsquares.push(puzzle_helper_square);
+          
+        })
+        .on('end', function() {
+          // loop on itself only if there are sockets still connected
+          if (newsquares.length > 0){
+            var data = {
+                newsquares: newsquares
+            };
+            for(s in newsquares){
+                if (newsquares[s].updated_timestamp_utc > connectionsArray[socket.handshake.query.slug].latest_timestamp){
+                    connectionsArray[socket.handshake.query.slug].latest_timestamp = newsquares[s].updated_timestamp_utc;
+                }
+            }
+            data.time = new Date();
+            socket.emit('notification', data);
+          }
         });
-      } else {
-
-        console.log('The server timer was stopped because there are no more socket connections on the app')
-
-      }
-    });
+  }
 };
 
+var pollingLoop = function(interval){
+    for (s in connectionsArray){
+      queryDB(connectionsArray[s], interval);
+    }
+    var pollingTimer = setTimeout(function(){
+      pollingLoop(interval);
+    }, interval);
+}
 
 // creating a new websocket to keep the content updated without any AJAX request
 io.sockets.on('connection', function(socket) {
 
-  console.log('Number of connections:' + connectionsArray.length);
-  // starting the loop only if at least there is one user connected
-  if (!connectionsArray.length) {
-    pollingLoop();
+  //console.log("Query: ", socket.handshake.query);
+  if (socket.handshake.query.slug){
+    console.log('A new socket is connected! (' + socket.handshake.query.slug + ')');
+    socket.latest_timestamp = 0;
+    connectionsArray[socket.handshake.query.slug] = socket;
+    connectionsArray[socket.handshake.query.slug].squares = [];
+    console.log('puzzle:' + connectionsArray[socket.handshake.query.slug].handshake.query.slug);
+    if (Object.keys(connectionsArray).length == 1){
+      pollingLoop(POLLING_INTERVAL);
+    }
   }
+  
+  console.log('Number of connections:' + Object.keys(connectionsArray).length);
 
   socket.on('disconnect', function() {
-    var socketIndex = connectionsArray.indexOf(socket);
+    var socketIndex = socket.handshake.query.slug;
     console.log('socketID = %s got disconnected', socketIndex);
-    if (~socketIndex) {
-      connectionsArray.splice(socketIndex, 1);
-    }
+    delete connectionsArray[socket.handshake.query.slug];
   });
-
-  console.log('A new socket is connected!');
-  connectionsArray.push(socket);
 
 });
 
-var updateSockets = function(data) {
-  // adding the time of the last update
-  data.time = new Date();
-  console.log('Pushing new data to the clients connected ( connections amount = %s ) - %s', connectionsArray.length , data.time);
-  // sending new data to all the sockets connected
-  connectionsArray.forEach(function(tmpSocket) {
-    tmpSocket.volatile.emit('notification', data);
-  });
-};
-
-console.log('Please use your browser to navigate to http://localhost:8000');
+console.log('Please use your browser to navigate to http://localhost:' + port);
