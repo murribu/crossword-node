@@ -2,7 +2,6 @@ var app = require('http').createServer(handler),
   io = require('socket.io').listen(app),
   fs = require('fs'),
   mysql = require('mysql'),
-  Future = require('fibers/future'),
   connectionsArray = [],
   config = require('./config'),
   connection = mysql.createConnection({

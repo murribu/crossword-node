@@ -4,7 +4,6 @@
   "description": "nodejs-MySQL-push-notifications-demo",
   "main": "server.js",
   "dependencies": {
-    "fibers": "^1.0.10",
     "mysql": "~2.5.4",
     "socket.io": "~1.3.2"
   },
